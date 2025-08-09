@@ -120,3 +120,62 @@ def render_slides_video(
         output_path,
     ]
     _run(cmd_concat)
+
+
+def render_kinetic_video(
+    beats: List[str],
+    captions: List[Dict[str, Any]],
+    output_path: str,
+    brand: Dict[str, Any],
+) -> None:
+    primary = brand.get('primary', '#FFFFFF')
+    secondary = brand.get('secondary', '#111111')
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    seg_dir = os.path.join(os.path.dirname(output_path), "segments")
+    os.makedirs(seg_dir, exist_ok=True)
+
+    num_beats = max(len(beats), 1)
+    default_total = max(10.0, float(num_beats) * 3.0)
+    per_default = default_total / float(num_beats)
+
+    segment_files: List[str] = []
+    for i, beat in enumerate(beats or ["..."]):
+        duration = _segment_duration(captions, i, per_default)
+        segment_path = os.path.join(seg_dir, f"kin_{i:02d}.mp4")
+        # Slide-in from bottom to top area over first 0.5s then hold
+        y_expr = "if(lt(t,0.5), h*0.85 - (h*0.55)*(t/0.5), h*0.30)"
+        text_filter = _build_drawtext(
+            beat,
+            x='(w-text_w)/2',
+            y=y_expr,
+            fontsize=72,
+            fontcolor=primary,
+            boxcolor=f"{secondary}@0.6",
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", f"color=c={secondary}:size=1080x1920:rate=30",
+            "-t", f"{duration:.3f}",
+            "-vf", text_filter,
+            "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+            segment_path,
+        ]
+        _run(cmd)
+        segment_files.append(segment_path)
+
+    # Concat segments
+    concat_list = os.path.join(seg_dir, "concat.txt")
+    with open(concat_list, "w") as f:
+        for p in segment_files:
+            f.write(f"file '{p}'\n")
+
+    cmd_concat = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0", "-i", concat_list,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+        "-an",
+        output_path,
+    ]
+    _run(cmd_concat)

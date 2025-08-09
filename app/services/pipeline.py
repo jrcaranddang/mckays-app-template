@@ -2,7 +2,7 @@ import os
 import json
 from typing import Dict, Any, List
 from .script import generate_script_beats
-from .render import render_slides_video
+from .render import render_slides_video, render_kinetic_video
 from .tts import synthesize_tts_for_beats
 from .pexels import search_and_download_pexels_video
 
@@ -39,18 +39,24 @@ def generate_video_pipeline(request_id: str, recipe: Dict[str, Any]) -> str:
     # 3) Phrase-level captions by distributing TTS duration
     captions = _timings_from_duration(beats, vo_duration)
 
-    # 4) Attempt Pexels b‑roll per beat
-    assets: List[str] = []
-    assets_dir = os.path.join(job_dir, "assets")
-    ensure_dir(assets_dir)
-    for beat in beats:
-        clip = search_and_download_pexels_video(beat, assets_dir, orientation="portrait")
-        assets.append(clip or "")
+    style = recipe.get("style_preset", "slides_v1")
 
-    # 5) Render video with VO and assets (renderer will handle empty assets by using slides)
+    # 4) Attempt Pexels for slides style
+    assets: List[str] = []
+    if style.startswith("slides"):
+        assets_dir = os.path.join(job_dir, "assets")
+        ensure_dir(assets_dir)
+        for beat in beats:
+            clip = search_and_download_pexels_video(beat, assets_dir, orientation="portrait")
+            assets.append(clip or "")
+
+    # 5) Render
     brand = recipe.get("brand", {})
     output_mp4 = os.path.join(job_dir, "video.mp4")
-    render_slides_video(beats=beats, captions=captions, output_path=output_mp4, brand=brand, assets=assets)
+    if style.startswith("kinetic"):
+        render_kinetic_video(beats=beats, captions=captions, output_path=output_mp4, brand=brand)
+    else:
+        render_slides_video(beats=beats, captions=captions, output_path=output_mp4, brand=brand, assets=assets)
 
     # 6) Mux voiceover if exists
     try:
