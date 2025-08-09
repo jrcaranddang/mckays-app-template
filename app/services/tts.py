@@ -1,31 +1,40 @@
 import os
-import io
-import math
+import subprocess
+import tempfile
 from typing import List, Tuple
 import requests
-from pydub import AudioSegment
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # default voice
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 
 
-def _estimate_audio_duration_seconds(total_chars: int, wpm: int = 165) -> float:
-    words = max(total_chars / 5.0, 1.0)
-    minutes = words / float(wpm)
-    return max(minutes * 60.0, 4.0)
+def _ffprobe_duration(path: str) -> float:
+    try:
+        out = subprocess.check_output([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", path
+        ], stderr=subprocess.DEVNULL)
+        return float(out.decode().strip())
+    except Exception:
+        return 0.0
+
+
+def _generate_silence_wav(path: str, duration_s: float) -> None:
+    subprocess.run([
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-t", f"{duration_s:.3f}",
+        "-c:a", "pcm_s16le",
+        path,
+    ], check=True)
 
 
 def synthesize_tts_for_beats(beats: List[str]) -> Tuple[str, float]:
-    """
-    Synthesize a single TTS audio for all beats concatenated with spaces.
-    Returns: (audio_path, duration_seconds)
-    Fallback: If ELEVENLABS_API_KEY is missing or request fails, create a silent wav matching estimated duration.
-    """
     os.makedirs("/workspace/output/tts", exist_ok=True)
     text = " ".join(beats)
     target_path = "/workspace/output/tts/voiceover.wav"
 
-    if ELEVENLABS_API_KEY:
+    if ELEVENLABS_API_KEY and text.strip():
         try:
             url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
             headers = {
@@ -39,14 +48,21 @@ def synthesize_tts_for_beats(beats: List[str]) -> Tuple[str, float]:
             }
             resp = requests.post(url, headers=headers, json=payload, timeout=60)
             resp.raise_for_status()
-            audio_mp3 = AudioSegment.from_file(io.BytesIO(resp.content), format="mp3")
-            audio_mp3.export(target_path, format="wav")
-            return target_path, audio_mp3.duration_seconds
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_mp3:
+                tmp_mp3.write(resp.content)
+                tmp_mp3.flush()
+                mp3_path = tmp_mp3.name
+            # Convert to wav
+            subprocess.run(["ffmpeg", "-y", "-i", mp3_path, "-ar", "44100", "-ac", "2", target_path], check=True)
+            dur = _ffprobe_duration(target_path)
+            if dur > 0:
+                return target_path, dur
         except Exception:
             pass
 
-    # Fallback: generate silence based on text length
-    est = _estimate_audio_duration_seconds(len(text))
-    silence = AudioSegment.silent(duration=int(est * 1000))
-    silence.export(target_path, format="wav")
+    # Fallback: estimate duration ~165 wpm
+    words = max(len(text) / 5.0, 1.0)
+    minutes = words / 165.0
+    est = max(minutes * 60.0, 6.0)
+    _generate_silence_wav(target_path, est)
     return target_path, est

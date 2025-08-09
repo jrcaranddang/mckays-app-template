@@ -26,7 +26,11 @@ def search_and_download_pexels_video(query: str, out_dir: str, orientation: str 
         choice = random.choice(videos)
         files = choice.get("video_files", [])
         # Prefer 1080x1920 portrait or closest
-        files_sorted = sorted(files, key=lambda f: (abs((f.get("width") or 1080) - 1080) + abs((f.get("height") or 1920) - 1920))) )
+        def metric(f):
+            w = f.get("width") or 1080
+            h = f.get("height") or 1920
+            return abs(w - 1080) + abs(h - 1920)
+        files_sorted = sorted(files, key=metric)
         url = files_sorted[0]["link"] if files_sorted else None
         if not url:
             return None
