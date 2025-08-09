@@ -15,13 +15,19 @@ def _escape_value(value: str) -> str:
     )
 
 
+def _escape_expr(expr: str) -> str:
+    return expr.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,")
+
+
 def _build_drawtext(text: str, x: str, y: str, fontsize: int, fontcolor: str, boxcolor: str = None, fontfile: str = None) -> str:
     text_escaped = _escape_value(text)
+    x_escaped = _escape_expr(x)
+    y_escaped = _escape_expr(y)
     options = [
         "drawtext",
         f"text='{text_escaped}'",
-        f"x={x}",
-        f"y={y}",
+        f"x={x_escaped}",
+        f"y={y_escaped}",
         f"fontsize={fontsize}",
         f"fontcolor={fontcolor}",
         f"fontfile='{fontfile or FONT_FALLBACK}'",
@@ -148,7 +154,7 @@ def render_kinetic_video(
         text_filter = _build_drawtext(
             beat,
             x='(w-text_w)/2',
-            y=f"'{y_expr}'",
+            y=y_expr,
             fontsize=72,
             fontcolor=primary,
             boxcolor=f"{secondary}@0.6",

@@ -74,6 +74,26 @@ def generate_video_pipeline(request_id: str, recipe: Dict[str, Any]) -> str:
     except Exception:
         pass
 
+    # 7) Watermark overlay if provided
+    wm = (recipe.get("brand", {}) or {}).get("watermark_uri")
+    if wm and os.path.exists(wm):
+        watermarked = os.path.join(job_dir, "video_final.mp4")
+        try:
+            from subprocess import run
+            run([
+                "ffmpeg", "-y",
+                "-i", output_mp4,
+                "-i", wm,
+                "-filter_complex", "[0:v][1:v]overlay=W-w-40:H-h-40:format=auto[v]",
+                "-map", "[v]", "-map", "0:a?",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                watermarked
+            ], check=True)
+            output_mp4 = watermarked
+        except Exception:
+            pass
+
     with open(os.path.join(job_dir, "metadata.json"), "w") as f:
         json.dump({"recipe": recipe, "beats": beats, "captions": captions, "voiceover": vo_path, "assets": assets}, f, indent=2)
 
