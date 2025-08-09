@@ -6,6 +6,7 @@ from .render import render_slides_video, render_kinetic_video
 from .tts import synthesize_tts_for_beats
 from .pexels import search_and_download_pexels_video
 from .captions import write_srt, write_vtt
+from .music import select_or_generate_music
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/workspace/output")
 
@@ -79,16 +80,35 @@ def generate_video_pipeline(request_id: str, recipe: Dict[str, Any]) -> str:
     try:
         from subprocess import run
         muxed = os.path.join(job_dir, "video_with_vo.mp4")
-        run([
-            "ffmpeg", "-y",
-            "-i", output_mp4,
-            "-i", vo_path,
-            "-c:v", "copy",
-            "-c:a", "aac", "-shortest",
-            muxed
-        ], check=True)
+        # Prepare music bed
+        music_wav = os.path.join(job_dir, "music.wav")
+        music_family = recipe.get("music_family")
+        music_path = select_or_generate_music(music_wav, family=music_family, duration_s=vo_duration)
+        if music_path:
+            # Build ducking filter: music ducked by sidechain from VO
+            run([
+                "ffmpeg", "-y",
+                "-i", output_mp4,
+                "-i", vo_path,
+                "-i", music_path,
+                "-filter_complex",
+                "[1:a]volume=1.0[vo];[2:a]volume=0.8[music];[music][vo]sidechaincompress=threshold=0.03:ratio=6:attack=5:release=200:makeup=2[mduck];[0:v][mduck][vo]concat=n=1:v=1:a=2[v][a0][a1]",
+                "-map", "[v]", "-map", "[a0]", "-map", "[a1]",
+                "-c:v", "copy",
+                "-c:a", "aac", "-shortest",
+                muxed
+            ], check=True)
+        else:
+            run([
+                "ffmpeg", "-y",
+                "-i", output_mp4,
+                "-i", vo_path,
+                "-c:v", "copy",
+                "-c:a", "aac", "-shortest",
+                muxed
+            ], check=True)
         output_mp4 = muxed
-        _write_status(job_dir, "muxed", {"video": output_mp4})
+        _write_status(job_dir, "muxed", {"video": output_mp4, "music": bool(music_path)})
     except Exception:
         pass
 
