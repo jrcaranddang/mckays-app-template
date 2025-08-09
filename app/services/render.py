@@ -1,0 +1,86 @@
+import os
+import math
+import subprocess
+from typing import List, Dict, Any
+
+FONT_FALLBACK = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+
+def _escape_value(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace(",", "\\,")
+        .replace("'", "\\'")
+    )
+
+
+def _build_drawtext(text: str, x: str, y: str, fontsize: int, fontcolor: str, boxcolor: str = None, fontfile: str = None) -> str:
+    text_escaped = _escape_value(text)
+    options = [
+        "drawtext",
+        f"text='{text_escaped}'",
+        f"x={x}",
+        f"y={y}",
+        f"fontsize={fontsize}",
+        f"fontcolor={fontcolor}",
+        f"fontfile='{fontfile or FONT_FALLBACK}'",
+    ]
+    if boxcolor:
+        options.append("box=1")
+        options.append(f"boxcolor={boxcolor}")
+        options.append("boxborderw=20")
+    return "=".join([options[0], ":".join(options[1:])])
+
+
+def _run(cmd: List[str]) -> None:
+    subprocess.run(cmd, check=True)
+
+
+def render_slides_video(beats: List[str], captions: List[Dict[str, Any]], output_path: str, brand: Dict[str, Any]) -> None:
+    total_duration = max(int(math.ceil((captions[-1]['end'] if captions else 55))), 10)
+    primary = brand.get('primary', '#FFFFFF')
+    secondary = brand.get('secondary', '#00E5FF')
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    seg_dir = os.path.join(os.path.dirname(output_path), "segments")
+    os.makedirs(seg_dir, exist_ok=True)
+
+    num_beats = max(len(beats), 1)
+    per_beat = total_duration / num_beats
+
+    segment_files: List[str] = []
+    for i, beat in enumerate(beats or ["..."]):
+        segment_path = os.path.join(seg_dir, f"seg_{i:02d}.mp4")
+        title = beat
+        body = beat
+        vf = ",".join([
+            _build_drawtext(title, x='(w-text_w)/2', y='h*0.12', fontsize=64, fontcolor=primary, boxcolor=f"{secondary}@0.20"),
+            _build_drawtext(body, x='(w-text_w)/2', y='h*0.80', fontsize=56, fontcolor=primary, boxcolor='#000000@0.4'),
+        ])
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", f"color=c={secondary}:size=1080x1920:rate=30",
+            "-t", f"{per_beat:.3f}",
+            "-vf", vf,
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+            "-an",
+            segment_path,
+        ]
+        _run(cmd)
+        segment_files.append(segment_path)
+
+    # Concat segments
+    concat_list = os.path.join(seg_dir, "concat.txt")
+    with open(concat_list, "w") as f:
+        for p in segment_files:
+            f.write(f"file '{p}'\n")
+
+    cmd_concat = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0", "-i", concat_list,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+        "-an",
+        output_path,
+    ]
+    _run(cmd_concat)

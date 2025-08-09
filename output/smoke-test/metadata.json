@@ -1,0 +1,17 @@
+{
+  "recipe": {
+    "topic": "5 surprising facts about black holes",
+    "tone": "curious, punchy",
+    "duration_s": 20,
+    "brand": {
+      "primary": "#FFFFFF",
+      "secondary": "#1e90ff"
+    }
+  },
+  "beats": [
+    "Hook: 5 surprising facts about black holes in under a minute.",
+    "First, here's what most people miss about 5 surprising facts about black holes.",
+    "Now, a quick tip you can use today.",
+    "Let's break it down in seconds."
+  ]
+}
