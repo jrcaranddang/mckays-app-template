@@ -144,11 +144,11 @@ def render_kinetic_video(
         duration = _segment_duration(captions, i, per_default)
         segment_path = os.path.join(seg_dir, f"kin_{i:02d}.mp4")
         # Slide-in from bottom to top area over first 0.5s then hold
-        y_expr = "if(lt(t,0.5), h*0.85 - (h*0.55)*(t/0.5), h*0.30)"
+        y_expr = "if(lt(t,0.5),h*0.85-(h*0.55)*(t/0.5),h*0.30)"
         text_filter = _build_drawtext(
             beat,
             x='(w-text_w)/2',
-            y=y_expr,
+            y=f"'{y_expr}'",
             fontsize=72,
             fontcolor=primary,
             boxcolor=f"{secondary}@0.6",
