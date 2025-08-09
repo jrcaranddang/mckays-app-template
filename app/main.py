@@ -1,0 +1,78 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from typing import List, Optional
+import uuid
+import os
+import json
+from .workers.tasks import enqueue_generate_video
+
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/workspace/output")
+
+
+class BrandKit(BaseModel):
+    primary: str = "#FFFFFF"
+    secondary: str = "#00E5FF"
+    font: str = "Inter"
+    watermark_uri: Optional[str] = None
+
+
+class VideoRecipe(BaseModel):
+    topic: str
+    niche: str = "general"
+    tone: str = "neutral"
+    language: str = "en"
+    duration_s: int = Field(ge=10, le=90, default=55)
+    style_preset: str = "slides_v1"
+    brand: BrandKit = Field(default_factory=BrandKit)
+    music_family: Optional[str] = None
+    cta: Optional[str] = None
+    platforms: List[str] = Field(default_factory=lambda: ["tiktok"]) 
+
+
+class EnqueueResponse(BaseModel):
+    request_id: str
+    status: str
+
+
+app = FastAPI(title="Faceless Shorts Generator")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True}
+
+
+@app.post("/generate", response_model=EnqueueResponse)
+async def generate(recipe: VideoRecipe):
+    request_id = str(uuid.uuid4())
+    try:
+        enqueue_generate_video(request_id=request_id, recipe=recipe.model_dump())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return EnqueueResponse(request_id=request_id, status="queued")
+
+
+@app.get("/jobs/{request_id}/status")
+async def job_status(request_id: str):
+    status_path = os.path.join(OUTPUT_DIR, request_id, "status.json")
+    if not os.path.exists(status_path):
+        raise HTTPException(status_code=404, detail="Not found")
+    with open(status_path) as f:
+        return json.load(f)
+
+
+@app.get("/jobs/{request_id}/file/{name}")
+async def job_file(request_id: str, name: str):
+    path = os.path.join(OUTPUT_DIR, request_id, name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path)
