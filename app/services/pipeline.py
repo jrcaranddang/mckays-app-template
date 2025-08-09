@@ -85,17 +85,16 @@ def generate_video_pipeline(request_id: str, recipe: Dict[str, Any]) -> str:
         music_family = recipe.get("music_family")
         music_path = select_or_generate_music(music_wav, family=music_family, duration_s=vo_duration)
         if music_path:
-            # Build ducking filter: music ducked by sidechain from VO
+            # Build ducking filter: music ducked by sidechain from VO, then mixed with VO
             run([
                 "ffmpeg", "-y",
-                "-i", output_mp4,
-                "-i", vo_path,
-                "-i", music_path,
+                "-i", output_mp4,    # 0:v
+                "-i", vo_path,       # 1:a
+                "-i", music_path,    # 2:a
                 "-filter_complex",
-                "[1:a]volume=1.0[vo];[2:a]volume=0.8[music];[music][vo]sidechaincompress=threshold=0.03:ratio=6:attack=5:release=200:makeup=2[mduck];[0:v][mduck][vo]concat=n=1:v=1:a=2[v][a0][a1]",
-                "-map", "[v]", "-map", "[a0]", "-map", "[a1]",
-                "-c:v", "copy",
-                "-c:a", "aac", "-shortest",
+                "[2:a]volume=0.8[music];[music][1:a]sidechaincompress=threshold=0.03:ratio=6:attack=5:release=200[duck];[duck][1:a]amix=inputs=2:normalize=1[aout]",
+                "-map", "0:v", "-map", "[aout]",
+                "-c:v", "copy", "-c:a", "aac", "-shortest",
                 muxed
             ], check=True)
         else:
