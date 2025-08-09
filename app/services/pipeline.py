@@ -5,12 +5,21 @@ from .script import generate_script_beats
 from .render import render_slides_video, render_kinetic_video
 from .tts import synthesize_tts_for_beats
 from .pexels import search_and_download_pexels_video
+from .captions import write_srt, write_vtt
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/workspace/output")
 
 
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
+
+
+def _write_status(job_dir: str, state: str, extra: Dict[str, Any] = None) -> None:
+    payload = {"status": state}
+    if extra:
+        payload.update(extra)
+    with open(os.path.join(job_dir, "status.json"), "w") as f:
+        json.dump(payload, f)
 
 
 def _timings_from_duration(beats: List[str], total_duration: float) -> List[Dict[str, Any]]:
@@ -29,15 +38,21 @@ def generate_video_pipeline(request_id: str, recipe: Dict[str, Any]) -> str:
     ensure_dir(OUTPUT_DIR)
     job_dir = os.path.join(OUTPUT_DIR, request_id)
     ensure_dir(job_dir)
+    _write_status(job_dir, "started")
 
     # 1) Script beats
     beats = generate_script_beats(topic=recipe.get("topic", ""), duration_s=int(recipe.get("duration_s", 55)), tone=recipe.get("tone", "neutral"))
+    _write_status(job_dir, "scripted", {"beats": beats})
 
     # 2) TTS voiceover for total duration
     vo_path, vo_duration = synthesize_tts_for_beats(beats)
+    _write_status(job_dir, "tts_done", {"voiceover": vo_path, "duration": vo_duration})
 
     # 3) Phrase-level captions by distributing TTS duration
     captions = _timings_from_duration(beats, vo_duration)
+    write_srt(captions, os.path.join(job_dir, "captions.srt"))
+    write_vtt(captions, os.path.join(job_dir, "captions.vtt"))
+    _write_status(job_dir, "captions_done")
 
     style = recipe.get("style_preset", "slides_v1")
 
@@ -49,6 +64,7 @@ def generate_video_pipeline(request_id: str, recipe: Dict[str, Any]) -> str:
         for beat in beats:
             clip = search_and_download_pexels_video(beat, assets_dir, orientation="portrait")
             assets.append(clip or "")
+    _write_status(job_dir, "assets_resolved", {"assets": assets})
 
     # 5) Render
     brand = recipe.get("brand", {})
@@ -57,6 +73,7 @@ def generate_video_pipeline(request_id: str, recipe: Dict[str, Any]) -> str:
         render_kinetic_video(beats=beats, captions=captions, output_path=output_mp4, brand=brand)
     else:
         render_slides_video(beats=beats, captions=captions, output_path=output_mp4, brand=brand, assets=assets)
+    _write_status(job_dir, "rendered", {"video": output_mp4})
 
     # 6) Mux voiceover if exists
     try:
@@ -71,6 +88,7 @@ def generate_video_pipeline(request_id: str, recipe: Dict[str, Any]) -> str:
             muxed
         ], check=True)
         output_mp4 = muxed
+        _write_status(job_dir, "muxed", {"video": output_mp4})
     except Exception:
         pass
 
@@ -91,10 +109,12 @@ def generate_video_pipeline(request_id: str, recipe: Dict[str, Any]) -> str:
                 watermarked
             ], check=True)
             output_mp4 = watermarked
+            _write_status(job_dir, "watermarked", {"video": output_mp4})
         except Exception:
             pass
 
     with open(os.path.join(job_dir, "metadata.json"), "w") as f:
         json.dump({"recipe": recipe, "beats": beats, "captions": captions, "voiceover": vo_path, "assets": assets}, f, indent=2)
+    _write_status(job_dir, "completed", {"video": output_mp4})
 
     return output_mp4

@@ -1,9 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
+import os
+import json
 from .workers.tasks import enqueue_generate_video
+
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/workspace/output")
 
 
 class BrandKit(BaseModel):
@@ -54,3 +59,20 @@ async def generate(recipe: VideoRecipe):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return EnqueueResponse(request_id=request_id, status="queued")
+
+
+@app.get("/jobs/{request_id}/status")
+async def job_status(request_id: str):
+    status_path = os.path.join(OUTPUT_DIR, request_id, "status.json")
+    if not os.path.exists(status_path):
+        raise HTTPException(status_code=404, detail="Not found")
+    with open(status_path) as f:
+        return json.load(f)
+
+
+@app.get("/jobs/{request_id}/file/{name}")
+async def job_file(request_id: str, name: str):
+    path = os.path.join(OUTPUT_DIR, request_id, name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path)
