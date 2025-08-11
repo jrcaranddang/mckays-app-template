@@ -14,8 +14,6 @@ import { PostHogUserIdentify } from "@/components/utilities/posthog/posthog-user
 import { Providers } from "@/components/utilities/providers"
 import { TailwindIndicator } from "@/components/utilities/tailwind-indicator"
 import { cn } from "@/lib/utils"
-import { ClerkProvider } from "@clerk/nextjs"
-import { auth } from "@clerk/nextjs/server"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
@@ -32,7 +30,24 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { userId } = await auth()
+  const disableClerk = process.env.DISABLE_CLERK === "1"
+
+  let userId: string | null = null
+  let ClerkProvider: React.ComponentType<{ children: React.ReactNode }>
+
+  if (disableClerk) {
+    ClerkProvider = ({ children }) => <>{children}</>
+  } else {
+    const [{ ClerkProvider: RealClerkProvider }, { auth }] = await Promise.all([
+      import("@clerk/nextjs"),
+      import("@clerk/nextjs/server")
+    ])
+    const authRes = await auth()
+    userId = authRes.userId
+    ClerkProvider = RealClerkProvider as unknown as React.ComponentType<{
+      children: React.ReactNode
+    }>
+  }
 
   if (userId) {
     const profileRes = await getProfileByUserIdAction(userId)
